@@ -1,3 +1,4 @@
-/out/*
-/.vs/*
-/upx.exe
+build/**/*
+out/**/*
+.vs/**/*
+upx.exe
