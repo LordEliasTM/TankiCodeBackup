@@ -5,14 +5,18 @@
 #include <thread>
 #include <filesystem>
 #include <syncstream>
+#include <barrier>
+#include <semaphore>
 #include <cpr/cpr.h>
 
+#define sout std::osyncstream(std::cout)
+#define serr std::osyncstream(std::cerr)
 
 using namespace std;
 namespace fs = filesystem;
 
-
 constexpr auto MAIN_JS_PATTERN =  R"(\/(browser-public|play)\/static\/js\/main\.[\w\d]{8}\.js)";
+constexpr int MAX_PARALLEL_DOWNLOADS = 2;
 
 
 string baseUrlForServer(int s) {
@@ -52,42 +56,59 @@ pair<string, string> buildLocalPath(int server, const string& mainJS) {
     return { localPath, fileName };
 }
 
+counting_semaphore<MAX_PARALLEL_DOWNLOADS> semaphore1{ MAX_PARALLEL_DOWNLOADS };
+
 void downloadMap(const string& url, const string& path, const string& fileName) {
+    semaphore1.acquire();
     cpr::Response resp = cpr::Get(cpr::Url{ url });
+    semaphore1.release();
 
     if (resp.status_code != 403 && resp.status_code != 404) {
         ofstream file(path, ios::binary);
         file.write(resp.text.data(), resp.text.size());
-        osyncstream(cout) << "Has Map! (" << fileName << "): " << resp.status_code << "\n";
+        sout << "MAP FOUND!!! (" << fileName << "): " << resp.status_code << "\n";
     }
     else {
-        osyncstream(cout) << "No Map (" << fileName << "): " << resp.status_code << "\n";
+        sout << "No Map (" << fileName << "): " << resp.status_code << "\n";
     }
 }
 
 void downloadFile(const string& url, const string& path) {
+    semaphore1.acquire();
     cpr::Response resp = cpr::Get(cpr::Url{ url });
+    semaphore1.release();
 
     if (resp.status_code == 200) {
         ofstream file(path, ios::binary);
         file.write(resp.text.data(), resp.text.size());
-        osyncstream(cout) << "Finished " << path << "\n";
+        sout << "Finished " << path << "\n";
     }
     else {
-        osyncstream(cerr) << "Download failed: " << url << " (" << resp.status_code << ")\n";
+        serr << "Download failed: " << url << " (" << resp.status_code << ")\n";
     }
 }
+
+
+int phase = 1;
+barrier barrier1(11, []() noexcept {
+    switch (phase) {
+    case 1: cout << "\nDownloading missing js files...\n"; break;
+    case 2: cout << "\nTrying to download maps...\n"; break;
+    }
+    phase++;
+});
+
 
 void downloadServerMainJS(int server) {
     string baseUrl = baseUrlForServer(server);
 
     auto indexHtmlOpt = fetchIndexHtml(server, baseUrl);
-    if (!indexHtmlOpt) return;
+    if (!indexHtmlOpt) return barrier1.arrive_and_drop();;
 
     auto mainJsUrlOpt = extractMainJSUrl(*indexHtmlOpt);
     if (!mainJsUrlOpt) {
-        osyncstream(cerr) << "JS not found in response from " << baseUrl << "\n";
-        return;
+        serr << "JS not found in response from " << baseUrl << "\n";
+        return barrier1.arrive_and_drop();;
     }
 
     auto [localPath, fileName] = buildLocalPath(server, *mainJsUrlOpt);
@@ -96,18 +117,22 @@ void downloadServerMainJS(int server) {
     string mapFilename = fileName + ".map";
 
     if (fs::exists(localPath)) {
-        osyncstream(cout) << baseUrl << ": " << fileName << "\nNo Changes\n";
+        sout << baseUrl << ": " << fileName << "\nNo Changes\n";
+        barrier1.arrive_and_wait();
     }
     else {
-        osyncstream(cout) << baseUrl << ": " << fileName << "\nUpdate!\n";
+        sout << baseUrl << ": " << fileName << "\nUpdate!\n";
+        barrier1.arrive_and_wait();
         downloadFile(baseUrl + *mainJsUrlOpt, localPath);
     }
+
+    barrier1.arrive_and_wait();
 
     if (!fs::exists(mapPath)) {
         downloadMap(baseUrl + mapUrl, mapPath, mapFilename);
     }
     else {
-        osyncstream(cout) << "Map already exists locally.\n";
+        sout << "Map already exists locally.\n";
     }
 }
 
