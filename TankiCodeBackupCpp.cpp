@@ -35,6 +35,18 @@ optional<string> fetchIndexHtml(int server, const string& baseUrl) {
     return nullopt;
 }
 
+// currently unused (TODO: implement downloadStatusJs)
+optional<string> fetchBalancer(int server, const string& baseUrl) {
+    string url = baseUrl + (server == 0 ? "/s/status.js" : "/balancer");
+
+    auto resp = cpr::Get(cpr::Url{ url });
+
+    if (resp.status_code == 200) {
+        return resp.text;
+    }
+    return nullopt;
+}
+
 optional<string> extractMainJSUrl(const string& html) {
     static const regex pattern(MAIN_JS_PATTERN);
     smatch match;
@@ -136,6 +148,20 @@ void downloadServerMainJS(int server) {
     }
 }
 
+// TODO: implement downloadStatusJs
+void downloadStatusJs() {
+    int server = 0;
+    string baseUrl = baseUrlForServer(server);
+
+    auto balancerOpt = fetchBalancer(server, baseUrl);
+    if (!balancerOpt) {
+        serr << "Balancer not found from " << baseUrl << "\n";
+        return;
+    }
+
+
+}
+
 int main() {
     {
         vector<jthread> threads;
@@ -146,7 +172,9 @@ int main() {
         // wait for threads to join (jthread joins automatically when going out of scope)
     }
 
+    sout << "\nDone.\n";
+
     // then wait 5 seconds
-    this_thread::sleep_for(chrono::seconds(5));
+    this_thread::sleep_for(chrono::seconds(10));
     return 0;
 }
