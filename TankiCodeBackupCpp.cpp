@@ -154,7 +154,7 @@ void downloadServerMainJS(int server) {
         downloadMap(mapUrl, mapPath, mapFilename);
     }
     else {
-        sout << "Map already exists locally.\n";
+        sout << "Map already downloaded. (" << mapFilename << ")\n";
     }
 }
 
@@ -177,6 +177,7 @@ int main() {
         vector<jthread> threads;
         for (int i = 0; i <= 10; ++i) {
             // server 0 is alias for /play server
+			// servers 1-10 are /browser-public test servers
             threads.emplace_back(downloadServerMainJS, i);
         }
         // wait for threads to join (jthread joins automatically when going out of scope)
@@ -184,7 +185,6 @@ int main() {
 
     sout << "\nDone.\n";
 
-    // then wait 5 seconds
     this_thread::sleep_for(chrono::seconds(10));
     return 0;
 }
