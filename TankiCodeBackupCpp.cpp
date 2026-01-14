@@ -15,7 +15,7 @@
 using namespace std;
 namespace fs = filesystem;
 
-constexpr auto MAIN_JS_PATTERN =  R"(\/(browser-public|play)\/static\/js\/main\.[\w\d]{8}\.js)";
+constexpr auto MAIN_JS_PATTERN =  R"(src="([^"]*main\.[\w\d]{8}\.js)\")";
 constexpr int MAX_PARALLEL_DOWNLOADS = 2;
 
 
@@ -52,7 +52,7 @@ optional<string> extractMainJSUrl(const string& html) {
     smatch match;
 
     if (regex_search(html, match, pattern)) {
-        return match[0].str();
+        return match[1].str();
     }
     return nullopt;
 }
@@ -123,25 +123,35 @@ void downloadServerMainJS(int server) {
         return barrier1.arrive_and_drop();;
     }
 
-    auto [localPath, fileName] = buildLocalPath(server, *mainJsUrlOpt);
-    string mapUrl = *mainJsUrlOpt + ".map";
+    // stupid ahh logic because tanki is updating rn, so gotta support
+    // old (/static/js/...) and new version (https://absolutepath...)
+    // so please delete this workaround when it's on new version everywhere
+	bool isNewVersion = mainJsUrlOpt->starts_with("http");
+    string realMainJsUrl = isNewVersion ? *mainJsUrlOpt : baseUrl + *mainJsUrlOpt;
+
+    auto [localPath, fileName] = buildLocalPath(server, realMainJsUrl);
+    string mapUrl = realMainJsUrl + ".map";
     string mapPath = localPath + ".map";
     string mapFilename = fileName + ".map";
 
+    // new version text is a temporary feature so you can see which
+    // servers have been updated (see above comment)
+    string newVersionText = isNewVersion ? " (new version)" : " (old version)";
+
     if (fs::exists(localPath)) {
-        sout << baseUrl << ": " << fileName << "\nNo Changes\n";
+        sout << baseUrl << ": " << fileName << newVersionText << "\nNo Changes\n";
         barrier1.arrive_and_wait();
     }
     else {
-        sout << baseUrl << ": " << fileName << "\nUpdate!\n";
+        sout << baseUrl << ": " << fileName << newVersionText << "\nUpdate!\n";
         barrier1.arrive_and_wait();
-        downloadFile(baseUrl + *mainJsUrlOpt, localPath);
+        downloadFile(realMainJsUrl, localPath);
     }
 
     barrier1.arrive_and_wait();
 
     if (!fs::exists(mapPath)) {
-        downloadMap(baseUrl + mapUrl, mapPath, mapFilename);
+        downloadMap(mapUrl, mapPath, mapFilename);
     }
     else {
         sout << "Map already exists locally.\n";
